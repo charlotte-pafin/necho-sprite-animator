@@ -71,6 +71,7 @@
   .ctrl input[type=number] { width: 70px; background: #1a1f2b; color: #e9ecf3; border: 1px solid #3a4256; border-radius: 8px; padding: 7px 9px; font-size: 13px; font-family: inherit; }
   .ctrl input[type=text] { flex: 1; min-width: 160px; background: #1a1f2b; color: #e9ecf3; border: 1px solid #3a4256; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
   .ctrl input[type=color] { width: 38px; height: 32px; background: none; border: 1px solid #3a4256; border-radius: 8px; padding: 2px; cursor: pointer; }
+  .ctrl select { background: #1a1f2b; color: #e9ecf3; border: 1px solid #3a4256; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; cursor: pointer; }
   .hint { font-size: 12px; color: #6f7787; margin: -8px 0 14px 142px; }
 
   .btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -191,9 +192,13 @@ Layout & technical requirements (critical for the animation to work):
         <span class="val" style="width:auto;color:#6f7787;font-size:12px;">crisp = no blur when enlarged</span>
       </div>
       <div class="ctrl">
-        <label>Auto-align frames</label>
-        <button id="alignBtn" class="active">On — fixes jumping</button>
-        <span class="val" style="width:auto;color:#6f7787;font-size:12px;">re-centers each frame so the character doesn't drift</span>
+        <label>Auto-fix jumping</label>
+        <select id="fitMode">
+          <option value="lock">Lock perfectly (recommended)</option>
+          <option value="align">Align position only</option>
+          <option value="off">Off — original frames</option>
+        </select>
+        <span class="val" id="fitNote" style="width:auto;color:#6f7787;font-size:12px;"></span>
       </div>
       <div class="btns">
         <button id="playBtn" class="active">Pause</button>
@@ -214,7 +219,7 @@ Layout & technical requirements (critical for the animation to work):
         <h2 style="margin:0;">Export</h2>
         <button id="downloadBtn">⬇ Download aligned sheet (PNG)</button>
       </div>
-      <p class="guide-note" style="margin:0;">Saves a corrected sprite sheet with every frame re-centered — use this version in your game/site so it doesn't jump. (Reflects the “Auto-align” setting above.)</p>
+      <p class="guide-note" style="margin:0;">Saves a corrected sprite sheet with every frame fixed — use this version in your game/site so it doesn't jump. (Reflects the “Auto-fix jumping” setting above.)</p>
     </div>
 
     <div class="panel">
@@ -231,7 +236,7 @@ Layout & technical requirements (critical for the animation to work):
 (function () {
   var state = {
     src: null, srcRaw: null, srcStable: null, img: null, imgW: 0, imgH: 0,
-    frameCount: 6, frame: 0, playing: true, stabilize: true,
+    frameCount: 6, frame: 0, playing: true, fit: 'lock',
     speed: 1, dur: 190, scale: 200, crisp: false,
     custom: null, bgCustom: '#2f6df6'
   };
@@ -267,24 +272,33 @@ Layout & technical requirements (critical for the animation to work):
   window.loadSheet = loadSheet; // exposed for quick testing
 
   function applySource() {
-    if (state.stabilize) {
-      if (!state.srcStable) { try { state.srcStable = buildStabilized(); } catch (e) { state.srcStable = null; } }
+    if (state.fit !== 'off') {
+      if (!state.srcStable) { try { state.srcStable = buildStabilized(state.fit); } catch (e) { state.srcStable = null; } }
       state.src = state.srcStable || state.srcRaw;
     } else {
       state.src = state.srcRaw;
     }
   }
 
+  function median(a) {
+    if (!a.length) return 0;
+    var b = a.slice().sort(function (x, y) { return x - y; });
+    var m = b.length >> 1;
+    return b.length % 2 ? b[m] : Math.round((b[m - 1] + b[m]) / 2);
+  }
+
   // Detect each frame's character via its alpha outline, then redraw every frame
-  // anchored to a shared bottom-center baseline so the loop doesn't drift/jump.
-  function buildStabilized() {
+  // anchored to a shared bottom-center baseline so the loop can't drift or jump.
+  //   mode 'align' — re-center + same baseline (keeps each frame's own size)
+  //   mode 'lock'  — also normalize every frame to one footprint (kills size pulse)
+  function buildStabilized(mode) {
     var img = state.img, n = state.frameCount;
     if (!img) return null;
     var W = img.naturalWidth, H = img.naturalHeight, fw = W / n;
     var src = document.createElement('canvas'); src.width = W; src.height = H;
     var sctx = src.getContext('2d'); sctx.drawImage(img, 0, 0);
     var data = sctx.getImageData(0, 0, W, H).data;
-    var boxes = [], maxFeet = 0, maxBh = 0;
+    var boxes = [], ws = [], hs = [], feet = [];
     for (var i = 0; i < n; i++) {
       var x0 = Math.round(i * fw), x1 = Math.round((i + 1) * fw);
       var minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
@@ -297,22 +311,26 @@ Layout & technical requirements (critical for the animation to work):
           }
         }
       }
-      var box = { x0: x0, minX: minX, maxX: maxX, minY: minY, maxY: maxY, empty: maxX < 0 };
-      if (!box.empty) { if (maxY > maxFeet) maxFeet = maxY; var bh = maxY - minY + 1; if (bh > maxBh) maxBh = bh; }
+      var box = { minX: minX, maxX: maxX, minY: minY, maxY: maxY, empty: maxX < 0 };
+      if (!box.empty) { ws.push(maxX - minX + 1); hs.push(maxY - minY + 1); feet.push(maxY); }
       boxes.push(box);
     }
-    var fwI = Math.round(fw);
-    var targetCx = fwI / 2;
-    var targetBottom = Math.min(H - 1, Math.max(maxFeet, maxBh));
+    var fwI = Math.round(fw), targetCx = fwI / 2;
+    var targetW = median(ws), targetH = median(hs);
+    var maxBh = hs.length ? Math.max.apply(null, hs) : 0;
+    var needTop = (mode === 'lock' ? targetH : maxBh);
+    var targetBottom = Math.min(H - 1, Math.max(median(feet), needTop - 1));
     var out = document.createElement('canvas'); out.width = W; out.height = H;
-    var octx = out.getContext('2d');
+    var octx = out.getContext('2d'); octx.imageSmoothingEnabled = false;
     for (var j = 0; j < n; j++) {
       var b = boxes[j];
       if (b.empty) continue;
-      var bw = b.maxX - b.minX + 1, bh2 = b.maxY - b.minY + 1;
-      var destX = Math.round(j * fw + targetCx - bw / 2);
-      var destY = Math.round(targetBottom - bh2 + 1);
-      octx.drawImage(src, b.minX, b.minY, bw, bh2, destX, destY, bw, bh2);
+      var bw = b.maxX - b.minX + 1, bh = b.maxY - b.minY + 1;
+      var dW = (mode === 'lock') ? targetW : bw;
+      var dH = (mode === 'lock') ? targetH : bh;
+      var destX = Math.round(j * fw + targetCx - dW / 2);
+      var destY = Math.round(targetBottom - dH + 1);
+      octx.drawImage(src, b.minX, b.minY, bw, bh, destX, destY, dW, dH);
     }
     return out.toDataURL('image/png');
   }
@@ -404,9 +422,9 @@ Layout & technical requirements (critical for the animation to work):
     var fw = frameW(), even = Math.abs(fw - Math.round(fw)) < 0.01;
     var msg = 'Sheet <b>' + state.imgW + '×' + state.imgH + '</b> → <b>' + state.frameCount +
       ' frames</b> of <b>' + (Math.round(fw * 100) / 100) + '×' + state.imgH + '</b>.';
-    if (!even) msg += state.stabilize
-      ? ' <span style="color:#6f7787;">Width isn’t evenly divisible by 6 — auto-align is compensating.</span>'
-      : ' <span class="warn">⚠ width not evenly divisible by 6 — turn on auto-align, or frames may be misaligned.</span>';
+    if (!even) msg += (state.fit !== 'off')
+      ? ' <span style="color:#6f7787;">Width isn’t evenly divisible by 6 — auto-fix is compensating.</span>'
+      : ' <span class="warn">⚠ width not evenly divisible by 6 — use an auto-fix mode, or frames may be misaligned.</span>';
     $('detected').innerHTML = msg;
     $('frameSize').textContent = Math.round(fw) + '×' + state.imgH;
   }
@@ -454,18 +472,25 @@ Layout & technical requirements (critical for the animation to work):
     crispBtn.classList.toggle('active', state.crisp);
     sizeStages(); buildStrip(); renderCss();
   });
-  var alignBtn = $('alignBtn');
-  alignBtn.addEventListener('click', function () {
-    state.stabilize = !state.stabilize;
-    alignBtn.textContent = state.stabilize ? 'On — fixes jumping' : 'Off — original frames';
-    alignBtn.classList.toggle('active', state.stabilize);
+  var FIT_NOTES = {
+    lock: 'normalizes every frame to one size + baseline — no jump, no size pulse',
+    align: 're-centers each frame (keeps its own size — subtle breathing stays)',
+    off: 'shows ChatGPT’s raw frames as-is'
+  };
+  var fitMode = $('fitMode');
+  function setFitNote() { $('fitNote').textContent = FIT_NOTES[state.fit]; }
+  fitMode.addEventListener('change', function () {
+    state.fit = this.value;
+    state.srcStable = null; // recompute for the new mode
+    setFitNote();
     applySource(); buildStages(); buildStrip(); applyAll(); schedule();
   });
+  fitMode.value = state.fit; setFitNote();
   $('downloadBtn').addEventListener('click', function () {
     var url = state.src;
     if (!url) return;
     var a = document.createElement('a');
-    a.href = url; a.download = state.stabilize ? 'sprite-aligned.png' : 'sprite.png';
+    a.href = url; a.download = (state.fit !== 'off') ? 'sprite-fixed.png' : 'sprite.png';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   });
   var playBtn = $('playBtn');
