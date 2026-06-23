@@ -236,6 +236,7 @@ Layout & technical requirements (critical for the animation to work):
 (function () {
   var state = {
     src: null, srcRaw: null, srcStable: null, img: null, imgW: 0, imgH: 0,
+    dispW: 0, dispH: 0,
     frameCount: 6, frame: 0, playing: true, fit: 'lock',
     speed: 1, dur: 190, scale: 200, crisp: false,
     custom: null, bgCustom: '#2f6df6'
@@ -246,7 +247,7 @@ Layout & technical requirements (critical for the animation to work):
   var $ = function (id) { return document.getElementById(id); };
   var drop = $('drop'), fileInput = $('file'), app = $('app');
 
-  function frameW() { return state.imgW / state.frameCount; }
+  function frameW() { return state.dispW / state.frameCount; }
 
   // ---- file loading ----
   function handleFile(file) {
@@ -274,10 +275,12 @@ Layout & technical requirements (critical for the animation to work):
   function applySource() {
     if (state.fit !== 'off') {
       if (!state.srcStable) { try { state.srcStable = buildStabilized(state.fit); } catch (e) { state.srcStable = null; } }
-      state.src = state.srcStable || state.srcRaw;
-    } else {
-      state.src = state.srcRaw;
+      if (state.srcStable) {
+        state.src = state.srcStable.url; state.dispW = state.srcStable.w; state.dispH = state.srcStable.h;
+        return;
+      }
     }
+    state.src = state.srcRaw; state.dispW = state.imgW; state.dispH = state.imgH;
   }
 
   function median(a) {
@@ -291,20 +294,51 @@ Layout & technical requirements (critical for the animation to work):
   // anchored to a shared bottom-center baseline so the loop can't drift or jump.
   //   mode 'align' — re-center + same baseline (keeps each frame's own size)
   //   mode 'lock'  — also normalize every frame to one footprint (kills size pulse)
+  // Find each frame's x-range from the transparent gutters between characters,
+  // so drifting/unevenly-spaced sprites are split correctly (not by rigid columns).
+  function detectRanges(data, W, H, n) {
+    var occ = new Uint8Array(W);
+    for (var y = 0; y < H; y++) {
+      var ro = y * W;
+      for (var x = 0; x < W; x++) { if (data[(ro + x) * 4 + 3] > 16) occ[x] = 1; }
+    }
+    var runs = [], s = -1;
+    for (var c = 0; c < W; c++) {
+      if (occ[c]) { if (s < 0) s = c; }
+      else if (s >= 0) { runs.push([s, c - 1]); s = -1; }
+    }
+    if (s >= 0) runs.push([s, W - 1]);
+    if (runs.length < n) { // characters touch or too few gaps — fall back to equal columns
+      var fw = W / n, eq = [];
+      for (var i = 0; i < n; i++) eq.push([Math.round(i * fw), Math.round((i + 1) * fw) - 1]);
+      return eq;
+    }
+    while (runs.length > n) { // merge across the smallest gaps (internal gaps < gutters)
+      var gi = 0, gmin = Infinity;
+      for (var k = 0; k < runs.length - 1; k++) {
+        var g = runs[k + 1][0] - runs[k][1];
+        if (g < gmin) { gmin = g; gi = k; }
+      }
+      runs[gi] = [runs[gi][0], runs[gi + 1][1]]; runs.splice(gi + 1, 1);
+    }
+    return runs;
+  }
+
   function buildStabilized(mode) {
     var img = state.img, n = state.frameCount;
     if (!img) return null;
-    var W = img.naturalWidth, H = img.naturalHeight, fw = W / n;
+    var W = img.naturalWidth, H = img.naturalHeight;
     var src = document.createElement('canvas'); src.width = W; src.height = H;
     var sctx = src.getContext('2d'); sctx.drawImage(img, 0, 0);
     var data = sctx.getImageData(0, 0, W, H).data;
-    var boxes = [], ws = [], hs = [], feet = [];
+    var ranges = detectRanges(data, W, H, n);
+    var boxes = [], ws = [], hs = [];
     for (var i = 0; i < n; i++) {
-      var x0 = Math.round(i * fw), x1 = Math.round((i + 1) * fw);
+      var x0 = ranges[i][0], x1 = ranges[i][1];
       var minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
       for (var y = 0; y < H; y++) {
         var rowoff = y * W;
-        for (var x = x0; x < x1; x++) {
+        for (var x = x0; x <= x1; x++) {
           if (data[(rowoff + x) * 4 + 3] > 16) {
             if (x < minX) minX = x; if (x > maxX) maxX = x;
             if (y < minY) minY = y; if (y > maxY) maxY = y;
@@ -312,15 +346,18 @@ Layout & technical requirements (critical for the animation to work):
         }
       }
       var box = { minX: minX, maxX: maxX, minY: minY, maxY: maxY, empty: maxX < 0 };
-      if (!box.empty) { ws.push(maxX - minX + 1); hs.push(maxY - minY + 1); feet.push(maxY); }
+      if (!box.empty) { ws.push(maxX - minX + 1); hs.push(maxY - minY + 1); }
       boxes.push(box);
     }
-    var fwI = Math.round(fw), targetCx = fwI / 2;
+    if (!ws.length) return null; // no character detected anywhere
     var targetW = median(ws), targetH = median(hs);
-    var maxBh = hs.length ? Math.max.apply(null, hs) : 0;
-    var needTop = (mode === 'lock' ? targetH : maxBh);
-    var targetBottom = Math.min(H - 1, Math.max(median(feet), needTop - 1));
-    var out = document.createElement('canvas'); out.width = W; out.height = H;
+    var maxW = Math.max.apply(null, ws), maxH = Math.max.apply(null, hs);
+    // Crop away empty space so the character fills each frame, with a small uniform margin.
+    var cellW = (mode === 'lock') ? targetW : maxW;
+    var cellH = (mode === 'lock') ? targetH : maxH;
+    var pad = Math.max(2, Math.round(Math.min(cellW, cellH) * 0.12));
+    var cw = cellW + pad * 2, ch = cellH + pad * 2;
+    var out = document.createElement('canvas'); out.width = cw * n; out.height = ch;
     var octx = out.getContext('2d'); octx.imageSmoothingEnabled = false;
     for (var j = 0; j < n; j++) {
       var b = boxes[j];
@@ -328,11 +365,11 @@ Layout & technical requirements (critical for the animation to work):
       var bw = b.maxX - b.minX + 1, bh = b.maxY - b.minY + 1;
       var dW = (mode === 'lock') ? targetW : bw;
       var dH = (mode === 'lock') ? targetH : bh;
-      var destX = Math.round(j * fw + targetCx - dW / 2);
-      var destY = Math.round(targetBottom - dH + 1);
+      var destX = Math.round(j * cw + (cw - dW) / 2);  // horizontal center
+      var destY = Math.round(ch - pad - dH);           // shared baseline
       octx.drawImage(src, b.minX, b.minY, bw, bh, destX, destY, dW, dH);
     }
-    return out.toDataURL('image/png');
+    return { url: out.toDataURL('image/png'), w: cw * n, h: ch };
   }
 
   drop.addEventListener('click', function () { fileInput.click(); });
@@ -386,13 +423,13 @@ Layout & technical requirements (critical for the animation to work):
   }
   function buildStrip() {
     var strip = $('strip'); strip.innerHTML = ''; stripEls = [];
-    var thW = 84, sc = thW / frameW(), thH = state.imgH * sc;
+    var thW = 84, sc = thW / frameW(), thH = state.dispH * sc;
     for (var i = 0; i < state.frameCount; i++) {
       var f = document.createElement('div'); f.className = 'f';
       var th = document.createElement('div'); th.className = 'thumb';
       th.style.width = thW + 'px'; th.style.height = thH + 'px';
       th.style.backgroundImage = "url('" + state.src + "')";
-      th.style.backgroundSize = (state.imgW * sc) + 'px ' + thH + 'px';
+      th.style.backgroundSize = (state.dispW * sc) + 'px ' + thH + 'px';
       th.style.backgroundPositionX = (-i * thW) + 'px';
       th.style.imageRendering = state.crisp ? 'pixelated' : 'auto';
       f.appendChild(th);
@@ -405,7 +442,7 @@ Layout & technical requirements (critical for the animation to work):
   // ---- rendering ----
   function applyAll() { sizeStages(); renderDetected(); renderCss(); render(); }
   function sizeStages() {
-    var h = state.scale, w = frameW() * (h / state.imgH), bgW = state.imgW * (h / state.imgH);
+    var h = state.scale, w = frameW() * (h / state.dispH), bgW = state.dispW * (h / state.dispH);
     stageEls.forEach(function (cat) {
       cat.style.width = w + 'px'; cat.style.height = h + 'px';
       cat.style.backgroundSize = bgW + 'px ' + h + 'px';
@@ -413,34 +450,35 @@ Layout & technical requirements (critical for the animation to work):
     });
   }
   function render() {
-    var h = state.scale, w = frameW() * (h / state.imgH);
+    var h = state.scale, w = frameW() * (h / state.dispH);
     stageEls.forEach(function (cat) { cat.style.backgroundPositionX = (-state.frame * w) + 'px'; });
     stripEls.forEach(function (f, idx) { f.classList.toggle('is-current', idx === state.frame); });
     $('frameNote').textContent = 'frame ' + (state.frame + 1) + ' / ' + state.frameCount;
   }
   function renderDetected() {
-    var fw = frameW(), even = Math.abs(fw - Math.round(fw)) < 0.01;
+    var origFw = state.imgW / state.frameCount, even = Math.abs(origFw - Math.round(origFw)) < 0.01;
     var msg = 'Sheet <b>' + state.imgW + '×' + state.imgH + '</b> → <b>' + state.frameCount +
-      ' frames</b> of <b>' + (Math.round(fw * 100) / 100) + '×' + state.imgH + '</b>.';
+      ' frames</b> of <b>' + (Math.round(origFw * 100) / 100) + '×' + state.imgH + '</b>.';
     if (!even) msg += (state.fit !== 'off')
       ? ' <span style="color:#6f7787;">Width isn’t evenly divisible by 6 — auto-fix is compensating.</span>'
       : ' <span class="warn">⚠ width not evenly divisible by 6 — use an auto-fix mode, or frames may be misaligned.</span>';
     $('detected').innerHTML = msg;
-    $('frameSize').textContent = Math.round(fw) + '×' + state.imgH;
+    $('frameSize').textContent = Math.round(origFw) + '×' + state.imgH;
   }
   function renderCss() {
     var fw = Math.round(frameW());
     var totalMs = state.custom ? state.custom.reduce(function (a, b) { return a + b; }, 0) : state.dur * state.frameCount;
     var css =
+'/* use the downloaded "sprite-fixed.png" from Export above */\n' +
 '.sprite {\n' +
 '  width: ' + fw + 'px;\n' +
-'  height: ' + state.imgH + 'px;\n' +
-"  background: url('your-sheet.png') no-repeat;\n" +
+'  height: ' + state.dispH + 'px;\n' +
+"  background: url('sprite-fixed.png') no-repeat;\n" +
 (state.crisp ? '  image-rendering: pixelated;\n' : '') +
 '  animation: sprite-play ' + (totalMs / 1000) + 's steps(' + state.frameCount + ') infinite;\n' +
 '}\n' +
 '@keyframes sprite-play {\n' +
-'  to { background-position: -' + state.imgW + 'px 0; }\n' +
+'  to { background-position: -' + state.dispW + 'px 0; }\n' +
 '}';
     if (state.custom) css += '\n\n/* note: custom per-frame timing needs JS, not pure CSS steps() */';
     $('cssOut').textContent = css;
