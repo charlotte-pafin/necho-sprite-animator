@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sprite sheet animator — drop a sheet, see it move</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #14171f;
+    color: #e9ecf3;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 28px 24px 72px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #9aa3b5; font-size: 14px; margin: 0 0 24px; }
+  code { background: #1a1f2b; padding: 2px 6px; border-radius: 5px; font-size: 12px; color: #cdd5e6; }
+
+  .drop {
+    border: 2px dashed #3a4256;
+    border-radius: 16px;
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    background: #191e29;
+  }
+  .drop:hover { border-color: #556680; }
+  .drop.over { border-color: #3b82f6; background: #1b2435; }
+  .drop .big { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  .drop .small { color: #9aa3b5; font-size: 13px; margin: 0; }
+  .drop .icon { font-size: 34px; margin-bottom: 10px; opacity: .8; }
+
+  .hidden { display: none !important; }
+
+  .detected { font-size: 13px; color: #9aa3b5; margin: 16px 0 22px; }
+  .detected b { color: #e9ecf3; font-weight: 600; }
+  .warn { color: #f5b545; }
+
+  .stage-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .stage {
+    flex: 1 1 180px; min-width: 160px;
+    border-radius: 14px; border: 1px solid #2c3344;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 22px 12px 12px;
+  }
+  .stage .label { margin-top: 14px; font-size: 12px; color: #9aa3b5; display: flex; align-items: center; gap: 6px; }
+  .bg-checker {
+    background-image:
+      linear-gradient(45deg, #2a2f3d 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2f3d 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2f3d 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2f3d 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-color: #202634;
+  }
+  .bg-light { background: #f3f0e6; }
+  .bg-dark  { background: #0e1118; }
+  .cat { background-repeat: no-repeat; }
+
+  .panel { background: #262c3c; border: 1px solid #2c3344; border-radius: 14px; padding: 20px 22px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #9aa3b5; margin: 0 0 16px; font-weight: 600; }
+
+  .ctrl { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .ctrl label { width: 130px; font-size: 13px; color: #9aa3b5; }
+  .ctrl input[type=range] { flex: 1; min-width: 140px; accent-color: #3b82f6; }
+  .ctrl .val { width: 78px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .ctrl input[type=number] { width: 70px; background: #1a1f2b; color: #e9ecf3; border: 1px solid #3a4256; border-radius: 8px; padding: 7px 9px; font-size: 13px; font-family: inherit; }
+  .ctrl input[type=text] { flex: 1; min-width: 160px; background: #1a1f2b; color: #e9ecf3; border: 1px solid #3a4256; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  .ctrl input[type=color] { width: 38px; height: 32px; background: none; border: 1px solid #3a4256; border-radius: 8px; padding: 2px; cursor: pointer; }
+  .hint { font-size: 12px; color: #6f7787; margin: -8px 0 14px 142px; }
+
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: #313a4f; color: #e9ecf3; border: 1px solid #3f4a63;
+    border-radius: 9px; padding: 8px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  button:hover { background: #3a4256; }
+  button.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  button:active { transform: scale(.97); }
+
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; }
+  .strip .f { text-align: center; }
+  .strip .f .cap { font-size: 11px; color: #9aa3b5; margin-top: 6px; }
+  .strip .f.is-current .thumb { outline: 2px solid #3b82f6; }
+  .thumb { border-radius: 8px; background-repeat: no-repeat; border: 1px solid #2c3344; }
+
+  pre.css { background: #11141c; border: 1px solid #2c3344; border-radius: 10px; padding: 14px 16px; font-size: 12px; line-height: 1.6; color: #cdd5e6; overflow-x: auto; margin: 0; white-space: pre; }
+  .copyrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+
+  .guide { border: 1px solid #2c3344; border-radius: 14px; background: #191e29; margin-bottom: 20px; overflow: hidden; }
+  .guide summary { cursor: pointer; padding: 16px 20px; font-size: 14px; font-weight: 600; color: #e9ecf3; list-style: none; }
+  .guide summary::-webkit-details-marker { display: none; }
+  .guide summary::before { content: '▸ '; color: #9aa3b5; }
+  .guide[open] summary::before { content: '▾ '; }
+  .guide-body { padding: 0 20px 20px; }
+  .guide-note { font-size: 13px; color: #9aa3b5; line-height: 1.6; margin: 0 0 14px; }
+  .guide-note b { color: #e9ecf3; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(20,23,31,.86); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .overlay.show { display: flex; }
+  .overlay-card { border: 2px dashed #3b82f6; border-radius: 16px; padding: 40px 60px; font-size: 18px; font-weight: 600; color: #e9ecf3; background: #1b2435; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="overlay" id="overlay"><div class="overlay-card">Drop to load your sprite sheet</div></div>
+<div class="wrap">
+  <h1>Sprite sheet animator</h1>
+  <p class="sub">Drop a horizontal sprite sheet (transparent PNG, 6 frames side by side) and watch it loop. Everything runs in your browser — nothing is uploaded anywhere.</p>
+
+  <details class="guide">
+    <summary>How to generate a sheet with ChatGPT</summary>
+    <div class="guide-body">
+      <p class="guide-note">ChatGPT won't output an exact pixel size, and that's fine — this tool auto-detects the size and splits the width into 6 equal frames. What matters: <b>exactly 6 frames</b>, a <b>truly transparent background</b>, and the <b>character staying still</b> between frames.</p>
+      <div class="copyrow">
+        <span style="font-size: 13px; color: #9aa3b5;">Copy this prompt and replace the [brackets]:</span>
+        <button id="copyPromptBtn">Copy prompt</button>
+      </div>
+      <pre class="css" id="promptText">Create a 6-frame pixel art sprite sheet of [CHARACTER, e.g. a shiba inu] for a social media game called Necho.
+
+[CHARACTER] is [SHAPE + PERSONALITY, e.g. small, round, chubby, and unbothered], in a neutral resting pose.
+Key features: [2-4 DISTINCT FEATURES, e.g. big dark eyes, brown muzzle, cream belly, small rounded paws].
+
+Show a subtle idle loop. Keep the character IDENTICAL in every frame - same size, same position, same colors - and move only tiny details by 1-2 pixels:
+- Frame 1: neutral resting pose
+- Frame 2: body rises slightly, as if breathing in
+- Frame 3: back to neutral
+- Frame 4: [SMALL ACCENT MOTION, e.g. ears flop down / eyes blink / tail flicks]
+- Frame 5: [the accent continues or peaks]
+- Frame 6: back to neutral, so the loop returns smoothly to Frame 1
+
+Style: thick dark pixel outline, soft pixel shading, big expressive eyes, cute Japanese game-mascot look, chunky low-resolution pixels.
+
+Layout & technical requirements (critical for the animation to work):
+- Exactly 6 frames, arranged left to right in ONE single horizontal row.
+- All 6 frames the SAME width, evenly spaced, with equal gaps between them and equal margins on the left and right edges.
+- The character is the same size and centered the same way in every frame, resting on a shared baseline, so it does not drift or jump between frames.
+- Fully transparent background (real alpha) - no white fill, no color fill, no checkerboard, no border, no boxes or grid lines around the frames.
+- No ground shadow, no background scenery, no text or frame numbers, no UI, no extra characters - only the character floating on transparent space.
+- Wide landscape strip, about 6 times wider than one frame.
+- Export as a transparent PNG.</pre>
+      <p class="guide-note" style="margin-top: 14px;"><b>Before uploading:</b> count 6 frames · confirm the background is transparent (not white) · check the character doesn't drift. If the background comes out white, reply to ChatGPT with "make the background fully transparent (alpha), remove any white" and regenerate.</p>
+    </div>
+  </details>
+
+  <div class="drop" id="drop">
+    <div class="icon">🖼️</div>
+    <p class="big">Drop your sprite sheet here</p>
+    <p class="small">or click to choose a PNG · must be 6 frames in one row</p>
+    <input type="file" id="file" accept="image/png,image/*" class="hidden" />
+  </div>
+
+  <div id="app" class="hidden">
+    <p class="detected" id="detected"></p>
+
+    <div class="stage-row" id="stageRow"></div>
+
+    <div class="panel">
+      <h2>Playback</h2>
+      <div class="ctrl">
+        <label>Frames in sheet</label>
+        <span class="val" style="width:auto;color:#e9ecf3;">6 (fixed)</span>
+        <span class="val" id="frameSize" style="width:auto;color:#9aa3b5;"></span>
+      </div>
+      <div class="ctrl">
+        <label>Speed</label>
+        <input type="range" id="speed" min="0.25" max="2" step="0.05" value="1" />
+        <span class="val" id="speedVal">1.00×</span>
+      </div>
+      <div class="ctrl">
+        <label>Frame duration</label>
+        <input type="range" id="dur" min="60" max="500" step="10" value="190" />
+        <span class="val" id="durVal">190 ms</span>
+      </div>
+      <div class="ctrl">
+        <label>Display size</label>
+        <input type="range" id="scale" min="48" max="400" step="2" value="200" />
+        <span class="val" id="scaleVal">200px</span>
+      </div>
+      <div class="ctrl">
+        <label>Custom timing</label>
+        <input type="text" id="custom" placeholder="optional per-frame ms, e.g. 200,200,200,120,200,200" />
+      </div>
+      <div class="hint">Leave custom timing blank to use one duration for all frames. Fill it for effects like a quick blink.</div>
+      <div class="ctrl">
+        <label>Pixel art mode</label>
+        <button id="crispBtn">Smooth scaling</button>
+        <span class="val" style="width:auto;color:#6f7787;font-size:12px;">crisp = no blur when enlarged</span>
+      </div>
+      <div class="btns">
+        <button id="playBtn" class="active">Pause</button>
+        <button id="prevBtn">‹ Prev</button>
+        <button id="nextBtn">Next ›</button>
+        <button id="resetBtn">↺ Start over</button>
+        <span class="val" style="width:auto;color:#9aa3b5;font-size:12px;" id="frameNote"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>All frames</h2>
+      <div class="strip" id="strip"></div>
+    </div>
+
+    <div class="panel">
+      <div class="copyrow">
+        <h2 style="margin:0;">CSS to use it on a website</h2>
+        <button id="copyBtn">Copy CSS</button>
+      </div>
+      <pre class="css" id="cssOut"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var state = {
+    src: null, imgW: 0, imgH: 0,
+    frameCount: 6, frame: 0, playing: true,
+    speed: 1, dur: 190, scale: 200, crisp: false,
+    custom: null, bgCustom: '#2f6df6'
+  };
+  var timer = null;
+  var stageEls = [], stripEls = [];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var drop = $('drop'), fileInput = $('file'), app = $('app');
+
+  function frameW() { return state.imgW / state.frameCount; }
+
+  // ---- file loading ----
+  function handleFile(file) {
+    if (!file || !/^image\//.test(file.type)) { alert('Please choose an image file (PNG recommended).'); return; }
+    var reader = new FileReader();
+    reader.onload = function (e) { loadSheet(e.target.result); };
+    reader.readAsDataURL(file);
+  }
+  function loadSheet(dataURL) {
+    var img = new Image();
+    img.onload = function () {
+      state.src = dataURL; state.imgW = img.naturalWidth; state.imgH = img.naturalHeight;
+      state.frame = 0;
+      drop.classList.add('hidden');
+      app.classList.remove('hidden');
+      buildStages(); buildStrip(); applyAll(); schedule();
+    };
+    img.onerror = function () { alert('Could not load that image.'); };
+    img.src = dataURL;
+  }
+  window.loadSheet = loadSheet; // exposed for quick testing
+
+  drop.addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () { if (fileInput.files[0]) handleFile(fileInput.files[0]); fileInput.value = ''; });
+
+  // Drop a sheet anywhere, anytime — works for the first load and for replacing the current one.
+  var overlay = $('overlay'), dragDepth = 0;
+  function hasFiles(e) {
+    var t = e.dataTransfer && e.dataTransfer.types;
+    if (!t) return false;
+    return Array.prototype.indexOf.call(t, 'Files') > -1 || (t.contains && t.contains('Files'));
+  }
+  window.addEventListener('dragenter', function (e) { e.preventDefault(); if (!hasFiles(e)) return; dragDepth++; overlay.classList.add('show'); });
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('dragleave', function (e) { e.preventDefault(); dragDepth--; if (dragDepth <= 0) { dragDepth = 0; overlay.classList.remove('show'); } });
+  window.addEventListener('drop', function (e) {
+    e.preventDefault(); dragDepth = 0; overlay.classList.remove('show');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+
+  // ---- build UI pieces ----
+  var stages = [
+    { cls: 'bg-checker', label: 'Transparent' },
+    { cls: 'bg-light', label: 'Light' },
+    { cls: 'bg-dark', label: 'Dark' },
+    { cls: 'bg-custom', label: 'Custom', custom: true }
+  ];
+  function buildStages() {
+    var row = $('stageRow'); row.innerHTML = ''; stageEls = [];
+    stages.forEach(function (s) {
+      var st = document.createElement('div');
+      st.className = 'stage ' + (s.custom ? '' : s.cls);
+      if (s.custom) st.style.background = state.bgCustom;
+      var cat = document.createElement('div'); cat.className = 'cat';
+      cat.style.backgroundImage = "url('" + state.src + "')";
+      st.appendChild(cat);
+      var lab = document.createElement('div'); lab.className = 'label';
+      lab.textContent = s.label;
+      if (s.custom) {
+        var picker = document.createElement('input');
+        picker.type = 'color'; picker.value = state.bgCustom;
+        picker.style.cssText = 'width:22px;height:22px;padding:1px;border:1px solid #3a4256;border-radius:6px;background:none;cursor:pointer;';
+        picker.addEventListener('input', function () { state.bgCustom = picker.value; st.style.background = picker.value; });
+        lab.appendChild(picker);
+      }
+      st.appendChild(lab);
+      row.appendChild(st);
+      stageEls.push(cat);
+    });
+  }
+  function buildStrip() {
+    var strip = $('strip'); strip.innerHTML = ''; stripEls = [];
+    var thW = 84, sc = thW / frameW(), thH = state.imgH * sc;
+    for (var i = 0; i < state.frameCount; i++) {
+      var f = document.createElement('div'); f.className = 'f';
+      var th = document.createElement('div'); th.className = 'thumb';
+      th.style.width = thW + 'px'; th.style.height = thH + 'px';
+      th.style.backgroundImage = "url('" + state.src + "')";
+      th.style.backgroundSize = (state.imgW * sc) + 'px ' + thH + 'px';
+      th.style.backgroundPositionX = (-i * thW) + 'px';
+      th.style.imageRendering = state.crisp ? 'pixelated' : 'auto';
+      f.appendChild(th);
+      var cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = 'frame ' + (i + 1);
+      f.appendChild(cap);
+      strip.appendChild(f); stripEls.push(f);
+    }
+  }
+
+  // ---- rendering ----
+  function applyAll() { sizeStages(); renderDetected(); renderCss(); render(); }
+  function sizeStages() {
+    var h = state.scale, w = frameW() * (h / state.imgH), bgW = state.imgW * (h / state.imgH);
+    stageEls.forEach(function (cat) {
+      cat.style.width = w + 'px'; cat.style.height = h + 'px';
+      cat.style.backgroundSize = bgW + 'px ' + h + 'px';
+      cat.style.imageRendering = state.crisp ? 'pixelated' : 'auto';
+    });
+  }
+  function render() {
+    var h = state.scale, w = frameW() * (h / state.imgH);
+    stageEls.forEach(function (cat) { cat.style.backgroundPositionX = (-state.frame * w) + 'px'; });
+    stripEls.forEach(function (f, idx) { f.classList.toggle('is-current', idx === state.frame); });
+    $('frameNote').textContent = 'frame ' + (state.frame + 1) + ' / ' + state.frameCount;
+  }
+  function renderDetected() {
+    var fw = frameW(), even = Math.abs(fw - Math.round(fw)) < 0.01;
+    var msg = 'Sheet <b>' + state.imgW + '×' + state.imgH + '</b> → <b>' + state.frameCount +
+      ' frames</b> of <b>' + (Math.round(fw * 100) / 100) + '×' + state.imgH + '</b>.';
+    if (!even) msg += ' <span class="warn">⚠ width not evenly divisible by frame count — frames may be misaligned.</span>';
+    $('detected').innerHTML = msg;
+    $('frameSize').textContent = Math.round(fw) + '×' + state.imgH;
+  }
+  function renderCss() {
+    var fw = Math.round(frameW());
+    var totalMs = state.custom ? state.custom.reduce(function (a, b) { return a + b; }, 0) : state.dur * state.frameCount;
+    var css =
+'.sprite {\n' +
+'  width: ' + fw + 'px;\n' +
+'  height: ' + state.imgH + 'px;\n' +
+"  background: url('your-sheet.png') no-repeat;\n" +
+(state.crisp ? '  image-rendering: pixelated;\n' : '') +
+'  animation: sprite-play ' + (totalMs / 1000) + 's steps(' + state.frameCount + ') infinite;\n' +
+'}\n' +
+'@keyframes sprite-play {\n' +
+'  to { background-position: -' + state.imgW + 'px 0; }\n' +
+'}';
+    if (state.custom) css += '\n\n/* note: custom per-frame timing needs JS, not pure CSS steps() */';
+    $('cssOut').textContent = css;
+  }
+
+  // ---- timing loop ----
+  function durFor(frame) {
+    var base = (state.custom && state.custom[frame] != null) ? state.custom[frame] : state.dur;
+    return base / state.speed;
+  }
+  function tick() { state.frame = (state.frame + 1) % state.frameCount; render(); schedule(); }
+  function schedule() { clearTimeout(timer); if (state.playing && state.src) timer = setTimeout(tick, durFor(state.frame)); }
+
+  // ---- controls ----
+  $('speed').addEventListener('input', function () { state.speed = parseFloat(this.value); $('speedVal').textContent = state.speed.toFixed(2) + '×'; schedule(); });
+  $('dur').addEventListener('input', function () { state.dur = parseInt(this.value, 10); $('durVal').textContent = state.dur + ' ms'; renderCss(); schedule(); });
+  $('scale').addEventListener('input', function () { state.scale = parseInt(this.value, 10); $('scaleVal').textContent = state.scale + 'px'; sizeStages(); render(); });
+  $('custom').addEventListener('input', function () {
+    var raw = this.value.trim();
+    if (!raw) { state.custom = null; renderCss(); return; }
+    var arr = raw.split(',').map(function (s) { return parseInt(s.trim(), 10); }).filter(function (n) { return !isNaN(n) && n > 0; });
+    state.custom = (arr.length === state.frameCount) ? arr : null;
+    renderCss();
+  });
+  var crispBtn = $('crispBtn');
+  crispBtn.addEventListener('click', function () {
+    state.crisp = !state.crisp;
+    crispBtn.textContent = state.crisp ? 'Crisp pixels' : 'Smooth scaling';
+    crispBtn.classList.toggle('active', state.crisp);
+    sizeStages(); buildStrip(); renderCss();
+  });
+  var playBtn = $('playBtn');
+  playBtn.addEventListener('click', function () { state.playing = !state.playing; playBtn.textContent = state.playing ? 'Pause' : 'Play'; playBtn.classList.toggle('active', state.playing); schedule(); });
+  $('nextBtn').addEventListener('click', function () { state.playing = false; playBtn.textContent = 'Play'; playBtn.classList.remove('active'); clearTimeout(timer); state.frame = (state.frame + 1) % state.frameCount; render(); });
+  $('prevBtn').addEventListener('click', function () { state.playing = false; playBtn.textContent = 'Play'; playBtn.classList.remove('active'); clearTimeout(timer); state.frame = (state.frame - 1 + state.frameCount) % state.frameCount; render(); });
+  $('resetBtn').addEventListener('click', function () { clearTimeout(timer); state.src = null; app.classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; });
+  $('copyBtn').addEventListener('click', function () {
+    var txt = $('cssOut').textContent;
+    navigator.clipboard && navigator.clipboard.writeText(txt).then(function () {
+      var b = $('copyBtn'); b.textContent = 'Copied!'; setTimeout(function () { b.textContent = 'Copy CSS'; }, 1400);
+    });
+  });
+  $('copyPromptBtn').addEventListener('click', function () {
+    var txt = $('promptText').textContent;
+    navigator.clipboard && navigator.clipboard.writeText(txt).then(function () {
+      var b = $('copyPromptBtn'); b.textContent = 'Copied!'; setTimeout(function () { b.textContent = 'Copy prompt'; }, 1400);
+    });
+  });
+})();
+</script>
+</body>
+</html>
