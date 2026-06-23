@@ -125,24 +125,26 @@
 [CHARACTER] is [SHAPE + PERSONALITY, e.g. small, round, chubby, and unbothered], in a neutral resting pose.
 Key features: [2-4 DISTINCT FEATURES, e.g. big dark eyes, brown muzzle, cream belly, small rounded paws].
 
-Show a subtle idle loop. Keep the character IDENTICAL in every frame - same size, same position, same colors - and move only tiny details by 1-2 pixels:
-- Frame 1: neutral resting pose
-- Frame 2: body rises slightly, as if breathing in
-- Frame 3: back to neutral
-- Frame 4: [SMALL ACCENT MOTION, e.g. ears flop down / eyes blink / tail flicks]
-- Frame 5: [the accent continues or peaks]
-- Frame 6: back to neutral, so the loop returns smoothly to Frame 1
+Subtle idle loop. Keep the body's OUTLINE, SIZE, and POSITION exactly the same in all 6 frames. Animate ONLY small interior details (blink, mouth, cheeks, a 1-2 pixel ear or tail twitch). Do NOT change the character's overall height, width, or position between frames.
+- Frame 1: neutral, eyes open
+- Frame 2: eyes half-closed
+- Frame 3: eyes closed (blink)
+- Frame 4: eyes half-open
+- Frame 5: eyes open, tiny mouth or ear change
+- Frame 6: back to neutral, looping smoothly to Frame 1
 
 Style: thick dark pixel outline, soft pixel shading, big expressive eyes, cute Japanese game-mascot look, chunky low-resolution pixels.
 
 Layout & technical requirements (critical for the animation to work):
 - Exactly 6 frames, arranged left to right in ONE single horizontal row.
-- All 6 frames the SAME width, evenly spaced, with equal gaps between them and equal margins on the left and right edges.
-- The character is the same size and centered the same way in every frame, resting on a shared baseline, so it does not drift or jump between frames.
-- Fully transparent background (real alpha) - no white fill, no color fill, no checkerboard, no border, no boxes or grid lines around the frames.
-- No ground shadow, no background scenery, no text or frame numbers, no UI, no extra characters - only the character floating on transparent space.
-- Wide landscape strip, about 6 times wider than one frame.
-- Export as a transparent PNG.</pre>
+- Same size and same position in every frame, each centered on the same baseline, so the character does not drift or jump.
+- Leave a clear EMPTY transparent gap between each frame — frames must NOT touch or overlap.
+- The character should FILL most of each frame with only a small, even margin — do not leave large empty space around it.
+- Fully transparent background (PNG alpha) - no white fill, no color fill, no background panel, no checkerboard, no border, no boxes or grid lines, and no drop shadow under the character.
+- No text, no frame numbers, no UI, no extra characters - only the character on transparent space.
+- Export as a transparent PNG.
+
+If the background comes out white or colored, reply: "Make the background fully transparent (alpha) and remove any fill behind the character," then regenerate.</pre>
       <p class="guide-note" style="margin-top: 14px;"><b>Before uploading:</b> count 6 frames · confirm the background is transparent (not white) · check the character doesn't drift. If the background comes out white, reply to ChatGPT with "make the background fully transparent (alpha), remove any white" and regenerate.</p>
     </div>
   </details>
