@@ -391,44 +391,59 @@ If the background comes out white or colored, reply: "Make the background fully 
     var sctx = src.getContext('2d'); sctx.drawImage(img, 0, 0);
     var data = sctx.getImageData(0, 0, W, H).data;
     var ranges = detectRanges(data, W, H, n);
-    var boxes = [], ws = [], hs = [];
+    var boxes = [], hs = [];
     for (var i = 0; i < n; i++) {
       var x0 = ranges[i][0], x1 = ranges[i][1];
-      var minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
+      var minX = 1e9, maxX = -1, minY = 1e9, maxY = -1, sumX = 0, cnt = 0;
       for (var y = 0; y < H; y++) {
         var rowoff = y * W;
         for (var x = x0; x <= x1; x++) {
           if (data[(rowoff + x) * 4 + 3] > 16) {
             if (x < minX) minX = x; if (x > maxX) maxX = x;
             if (y < minY) minY = y; if (y > maxY) maxY = y;
+            sumX += x; cnt++;
           }
         }
       }
-      var box = { minX: minX, maxX: maxX, minY: minY, maxY: maxY, empty: maxX < 0 };
-      if (!box.empty) { ws.push(maxX - minX + 1); hs.push(maxY - minY + 1); }
+      var box = { minX: minX, maxX: maxX, minY: minY, maxY: maxY, cx: cnt ? sumX / cnt : 0, empty: maxX < 0 };
+      if (!box.empty) hs.push(maxY - minY + 1);
       boxes.push(box);
     }
-    if (!ws.length) return null; // no character detected anywhere
-    var targetW = median(ws), targetH = median(hs);
-    var maxW = Math.max.apply(null, ws), maxH = Math.max.apply(null, hs);
-    // Crop away empty space so the character fills each frame, with a small uniform margin.
-    var cellW = (mode === 'lock') ? targetW : maxW;
-    var cellH = (mode === 'lock') ? targetH : maxH;
-    var pad = Math.max(2, Math.round(Math.min(cellW, cellH) * 0.12));
-    var cw = cellW + pad * 2, ch = cellH + pad * 2;
-    var out = document.createElement('canvas'); out.width = cw * n; out.height = ch;
+    if (!hs.length) return null; // no character detected anywhere
+    var targetH = median(hs);
+
+    // Per frame: uniform scale (lock = normalize height, preserve aspect; align = keep size).
+    // Anchor horizontally on the INK CENTROID (the dense body, stable even when a tail/ear
+    // moves) and vertically on the BASELINE. This keeps the body planted while appendages move,
+    // instead of squishing the body to force a fixed width.
+    var leftExt = 0, rightExt = 0, scaledH = [];
+    for (var p = 0; p < n; p++) {
+      var bp = boxes[p]; if (bp.empty) { scaledH.push(0); continue; }
+      var sc = (mode === 'lock') ? (targetH / (bp.maxY - bp.minY + 1)) : 1;
+      var cLeft = (bp.cx - bp.minX) * sc;             // centroid → left edge
+      var cRight = (bp.maxX + 1 - bp.cx) * sc;        // centroid → right edge
+      if (cLeft > leftExt) leftExt = cLeft;
+      if (cRight > rightExt) rightExt = cRight;
+      scaledH.push((bp.maxY - bp.minY + 1) * sc);
+    }
+    var half = Math.ceil(Math.max(leftExt, rightExt));
+    var maxSH = Math.max.apply(null, scaledH);
+    var pad = Math.max(2, Math.round(Math.min(half * 2, maxSH) * 0.12));
+    var cw = half * 2 + pad * 2, ch = Math.ceil(maxSH) + pad * 2;
+    var cellCx = cw / 2, baseY = ch - pad;
+    var out = document.createElement('canvas'); out.width = Math.round(cw * n); out.height = Math.round(ch);
     var octx = out.getContext('2d'); octx.imageSmoothingEnabled = false;
     for (var j = 0; j < n; j++) {
       var b = boxes[j];
       if (b.empty) continue;
       var bw = b.maxX - b.minX + 1, bh = b.maxY - b.minY + 1;
-      var dW = (mode === 'lock') ? targetW : bw;
-      var dH = (mode === 'lock') ? targetH : bh;
-      var destX = Math.round(j * cw + (cw - dW) / 2);  // horizontal center
-      var destY = Math.round(ch - pad - dH);           // shared baseline
-      octx.drawImage(src, b.minX, b.minY, bw, bh, destX, destY, dW, dH);
+      var s = (mode === 'lock') ? (targetH / bh) : 1;
+      var dW = bw * s, dH = bh * s;
+      var destX = j * cw + cellCx - (b.cx - b.minX) * s;  // centroid at cell center
+      var destY = baseY - dH;                              // baseline at bottom
+      octx.drawImage(src, b.minX, b.minY, bw, bh, Math.round(destX), Math.round(destY), Math.round(dW), Math.round(dH));
     }
-    return { url: out.toDataURL('image/png'), w: cw * n, h: ch };
+    return { url: out.toDataURL('image/png'), w: Math.round(cw * n), h: Math.round(ch) };
   }
 
   drop.addEventListener('click', function () { fileInput.click(); });
