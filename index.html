@@ -315,31 +315,71 @@ If the background comes out white or colored, reply: "Make the background fully 
   // Find each frame's x-range from the transparent gutters between characters,
   // so drifting/unevenly-spaced sprites are split correctly (not by rigid columns).
   function detectRanges(data, W, H, n) {
-    var occ = new Uint8Array(W);
+    var colInk = new Int32Array(W); // opaque pixels per column
     for (var y = 0; y < H; y++) {
       var ro = y * W;
-      for (var x = 0; x < W; x++) { if (data[(ro + x) * 4 + 3] > 16) occ[x] = 1; }
+      for (var x = 0; x < W; x++) { if (data[(ro + x) * 4 + 3] > 16) colInk[x]++; }
     }
     var runs = [], s = -1;
     for (var c = 0; c < W; c++) {
-      if (occ[c]) { if (s < 0) s = c; }
+      if (colInk[c] > 0) { if (s < 0) s = c; }
       else if (s >= 0) { runs.push([s, c - 1]); s = -1; }
     }
     if (s >= 0) runs.push([s, W - 1]);
-    if (runs.length < n) { // characters touch or too few gaps — fall back to equal columns
+
+    function equalCols() {
       var fw = W / n, eq = [];
       for (var i = 0; i < n; i++) eq.push([Math.round(i * fw), Math.round((i + 1) * fw) - 1]);
       return eq;
     }
-    while (runs.length > n) { // merge across the smallest gaps (internal gaps < gutters)
-      var gi = 0, gmin = Infinity;
-      for (var k = 0; k < runs.length - 1; k++) {
-        var g = runs[k + 1][0] - runs[k][1];
-        if (g < gmin) { gmin = g; gi = k; }
+    if (!runs.length) return equalCols();
+
+    if (runs.length > n) { // merge across the smallest gaps (internal gaps < gutters)
+      while (runs.length > n) {
+        var gi = 0, gmin = Infinity;
+        for (var k = 0; k < runs.length - 1; k++) {
+          var g = runs[k + 1][0] - runs[k][1];
+          if (g < gmin) { gmin = g; gi = k; }
+        }
+        runs[gi] = [runs[gi][0], runs[gi + 1][1]]; runs.splice(gi + 1, 1);
       }
-      runs[gi] = [runs[gi][0], runs[gi + 1][1]]; runs.splice(gi + 1, 1);
+      return runs;
     }
-    return runs;
+    if (runs.length === n) return runs;
+
+    // Fewer groups than frames — some characters touch. Estimate how many frames
+    // each group holds (by width) and split the merged ones at their thinnest bridge.
+    var widths = runs.map(function (r) { return r[1] - r[0] + 1; });
+    var unit = median(widths);
+    if (unit <= 0) return equalCols();
+    var counts = widths.map(function (w) { return Math.max(1, Math.round(w / unit)); });
+    var total = counts.reduce(function (a, b) { return a + b; }, 0), guard = 0;
+    while (total > n && guard++ < 2000) {
+      var bi = -1, best = Infinity;
+      for (var i = 0; i < runs.length; i++) { if (counts[i] > 1) { var pf = widths[i] / counts[i]; if (pf < best) { best = pf; bi = i; } } }
+      if (bi < 0) break; counts[bi]--; total--;
+    }
+    while (total < n && guard++ < 2000) {
+      var bj = 0, best2 = -1;
+      for (var j = 0; j < runs.length; j++) { var pf2 = widths[j] / counts[j]; if (pf2 > best2) { best2 = pf2; bj = j; } }
+      counts[bj]++; total++;
+    }
+    if (total !== n) return equalCols();
+
+    var ranges = [];
+    for (var r = 0; r < runs.length; r++) {
+      var a = runs[r][0], b = runs[r][1], cc = counts[r];
+      if (cc <= 1) { ranges.push([a, b]); continue; }
+      var step = (b - a + 1) / cc, prev = a;
+      for (var m = 1; m < cc; m++) { // split at the lowest-ink column near each even division
+        var target = Math.round(a + m * step), win = Math.max(4, Math.round(step * 0.25));
+        var lo = Math.max(prev + 1, target - win), hi = Math.min(b - 1, target + win), sx = target, smin = Infinity;
+        for (var xx = lo; xx <= hi; xx++) { if (colInk[xx] < smin) { smin = colInk[xx]; sx = xx; } }
+        ranges.push([prev, sx - 1]); prev = sx;
+      }
+      ranges.push([prev, b]);
+    }
+    return ranges;
   }
 
   function buildStabilized(mode) { return fixSheet(state.img, state.frameCount, mode); }
