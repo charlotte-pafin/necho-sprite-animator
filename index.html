@@ -101,6 +101,15 @@
   .guide-note { font-size: 13px; color: #9aa3b5; line-height: 1.6; margin: 0 0 14px; }
   .guide-note b { color: #e9ecf3; }
 
+  #gallery { margin-top: 22px; }
+  .gallery-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #9aa3b5; margin: 0 0 12px; font-weight: 600; }
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+  .tile { border: 1px solid #2c3344; border-radius: 12px; background: #191e29; padding: 14px 10px 10px; cursor: pointer; text-align: center; transition: border-color .15s, background .15s; }
+  .tile:hover { border-color: #3b82f6; background: #1b2435; }
+  .tile .preview { height: 96px; display: flex; align-items: flex-end; justify-content: center; }
+  .tile .preview > div { background-repeat: no-repeat; }
+  .tile .name { font-size: 13px; color: #e9ecf3; margin-top: 8px; }
+
   .overlay { position: fixed; inset: 0; background: rgba(20,23,31,.86); display: none; align-items: center; justify-content: center; z-index: 50; }
   .overlay.show { display: flex; }
   .overlay-card { border: 2px dashed #3b82f6; border-radius: 16px; padding: 40px 60px; font-size: 18px; font-weight: 600; color: #e9ecf3; background: #1b2435; pointer-events: none; }
@@ -154,6 +163,11 @@ If the background comes out white or colored, reply: "Make the background fully 
     <p class="big">Drop your sprite sheet here</p>
     <p class="small">or click to choose a PNG · must be 6 frames in one row</p>
     <input type="file" id="file" accept="image/png,image/*" class="hidden" />
+  </div>
+
+  <div id="gallery">
+    <p class="gallery-title">Examples — click one to try it</p>
+    <div class="gallery-grid" id="galleryGrid"></div>
   </div>
 
   <div id="app" class="hidden">
@@ -247,7 +261,8 @@ If the background comes out white or colored, reply: "Make the background fully 
   var stageEls = [], stripEls = [];
 
   var $ = function (id) { return document.getElementById(id); };
-  var drop = $('drop'), fileInput = $('file'), app = $('app');
+  var drop = $('drop'), fileInput = $('file'), app = $('app'), gallery = $('gallery');
+  var BASE = 'https://charlotte-pafin.github.io/necho-sprite-animator/';
 
   function frameW() { return state.dispW / state.frameCount; }
 
@@ -260,12 +275,13 @@ If the background comes out white or colored, reply: "Make the background fully 
   }
   function loadSheet(dataURL) {
     var img = new Image();
+    img.crossOrigin = 'anonymous'; // keep canvas untainted for cross-origin sample URLs
     img.onload = function () {
       state.img = img; state.srcRaw = dataURL; state.srcStable = null;
       state.imgW = img.naturalWidth; state.imgH = img.naturalHeight;
       state.frame = 0;
       applySource();
-      drop.classList.add('hidden');
+      drop.classList.add('hidden'); if (gallery) gallery.classList.add('hidden');
       app.classList.remove('hidden');
       buildStages(); buildStrip(); applyAll(); schedule();
     };
@@ -326,8 +342,9 @@ If the background comes out white or colored, reply: "Make the background fully 
     return runs;
   }
 
-  function buildStabilized(mode) {
-    var img = state.img, n = state.frameCount;
+  function buildStabilized(mode) { return fixSheet(state.img, state.frameCount, mode); }
+
+  function fixSheet(img, n, mode) {
     if (!img) return null;
     var W = img.naturalWidth, H = img.naturalHeight;
     var src = document.createElement('canvas'); src.width = W; src.height = H;
@@ -537,7 +554,7 @@ If the background comes out white or colored, reply: "Make the background fully 
   playBtn.addEventListener('click', function () { state.playing = !state.playing; playBtn.textContent = state.playing ? 'Pause' : 'Play'; playBtn.classList.toggle('active', state.playing); schedule(); });
   $('nextBtn').addEventListener('click', function () { state.playing = false; playBtn.textContent = 'Play'; playBtn.classList.remove('active'); clearTimeout(timer); state.frame = (state.frame + 1) % state.frameCount; render(); });
   $('prevBtn').addEventListener('click', function () { state.playing = false; playBtn.textContent = 'Play'; playBtn.classList.remove('active'); clearTimeout(timer); state.frame = (state.frame - 1 + state.frameCount) % state.frameCount; render(); });
-  $('resetBtn').addEventListener('click', function () { clearTimeout(timer); state.src = null; app.classList.add('hidden'); drop.classList.remove('hidden'); fileInput.value = ''; });
+  $('resetBtn').addEventListener('click', function () { clearTimeout(timer); state.src = null; app.classList.add('hidden'); drop.classList.remove('hidden'); if (gallery) gallery.classList.remove('hidden'); fileInput.value = ''; });
   $('copyBtn').addEventListener('click', function () {
     var txt = $('cssOut').textContent;
     navigator.clipboard && navigator.clipboard.writeText(txt).then(function () {
@@ -550,6 +567,47 @@ If the background comes out white or colored, reply: "Make the background fully 
       var b = $('copyPromptBtn'); b.textContent = 'Copied!'; setTimeout(function () { b.textContent = 'Copy prompt'; }, 1400);
     });
   });
+
+  // ---- examples gallery ----
+  var SAMPLES = [
+    { name: 'Cat', file: 'samples/cat.png' },
+    { name: 'Raccoon', file: 'samples/raccoon.png' },
+    { name: 'Cloud', file: 'samples/cloud.png' },
+    { name: 'Shiba', file: 'samples/shiba.png' }
+  ];
+  var galTiles = [], galTimer = null, galFrame = 0;
+  function buildGallery() {
+    var grid = $('galleryGrid'); if (!grid) return;
+    SAMPLES.forEach(function (s) {
+      var url = BASE + s.file;
+      var tile = document.createElement('div'); tile.className = 'tile';
+      var prev = document.createElement('div'); prev.className = 'preview';
+      var inner = document.createElement('div'); prev.appendChild(inner);
+      var name = document.createElement('div'); name.className = 'name'; name.textContent = s.name;
+      tile.appendChild(prev); tile.appendChild(name);
+      tile.addEventListener('click', function () { loadSheet(url); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      grid.appendChild(tile);
+      var img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = function () {
+        var fixed = null; try { fixed = fixSheet(img, 6, 'lock'); } catch (e) { fixed = null; }
+        var u = fixed ? fixed.url : url;
+        var fw = (fixed ? fixed.w : img.naturalWidth) / 6;
+        var fh = fixed ? fixed.h : img.naturalHeight;
+        var H = 96, w = fw * (H / fh);
+        inner.style.width = w + 'px'; inner.style.height = H + 'px';
+        inner.style.backgroundImage = "url('" + u + "')";
+        inner.style.backgroundSize = (fw * 6 * (H / fh)) + 'px ' + H + 'px';
+        galTiles.push({ inner: inner, w: w });
+      };
+      img.onerror = function () { tile.style.display = 'none'; };
+      img.src = url;
+    });
+    if (!galTimer) galTimer = setInterval(function () {
+      galFrame = (galFrame + 1) % 6;
+      galTiles.forEach(function (t) { t.inner.style.backgroundPositionX = (-galFrame * t.w) + 'px'; });
+    }, 220);
+  }
+  buildGallery();
 })();
 </script>
 </body>
